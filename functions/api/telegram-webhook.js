@@ -7,7 +7,7 @@ export async function onRequestPost(context) {
     try {
         const update = await request.json();
 
-        // 1. Comando /start
+        // 1. Mensagem /start
         if (update.message && update.message.text && update.message.text.startsWith("/start")) {
             const chatId = update.message.chat.id;
             await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
@@ -171,5 +171,3 @@ async function sendTelegramPhoto(token, chatId, photoUrl, caption, replyMarkup =
         })
     });
 }
-
-VERSÃO FINAL BOT
