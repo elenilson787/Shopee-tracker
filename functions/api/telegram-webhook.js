@@ -107,6 +107,7 @@ async function answerCallback(token, callbackId) {
 
 // Consulta GraphQL oficial da Shopee
 async function buscarOfertaShopee(keyword, appId, secret) {
+async function buscarOfertaShopee(keyword, appId, secret) {
     try {
         const query = `
             query {
@@ -120,6 +121,54 @@ async function buscarOfertaShopee(keyword, appId, secret) {
                 }
             }
         `;
+
+        const timestamp = Math.floor(Date.now() / 1000);
+        const payload = JSON.stringify({ query }); // importante: sem espaços extras
+
+        // === ASSINATURA CORRETA (SHA-256 simples) ===
+        const baseString = `\( {appId} \){timestamp}\( {payload} \){secret}`;
+        const encoder = new TextEncoder();
+        const data = encoder.encode(baseString);
+        
+        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+        const signature = Array.from(new Uint8Array(hashBuffer))
+            .map(b => b.toString(16).padStart(2, "0"))
+            .join("");
+
+        const response = await fetch("https://open-api.affiliate.shopee.com.br/graphql", {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json", 
+                "Authorization": `SHA256 Credential=\( {appId}, Timestamp= \){timestamp}, Signature=${signature}` 
+            },
+            body: payload
+        });
+
+        const dataResp = await response.json();
+
+        // Debug útil (temporário)
+        if (dataResp.errors) {
+            console.log("Erro Shopee:", JSON.stringify(dataResp.errors));
+            return null;
+        }
+
+        const produtos = dataResp?.data?.productOfferV2?.nodes;
+
+        if (produtos && produtos.length > 0) {
+            const produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
+            return {
+                titulo: produtoSorteado.productName,
+                preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
+                link: produtoSorteado.offerLink,
+                imagem: produtoSorteado.imageUrl
+            };
+        }
+        return null;
+    } catch (e) {
+        console.log("Erro na busca:", e.message);
+        return null;
+    }
+}
 
         const timestamp = Math.floor(Date.now() / 1000);
         const payload = JSON.stringify({ query });
