@@ -70,10 +70,11 @@ export async function onRequestPost(context) {
 
                 if (produto) {
                     const legenda =
-                        `🎯 OFERTA ENCONTRADA!\n\n` +
+                        `🎯 OFERTA RELÂMPAGO ENCONTRADA!\n\n` +
                         `📦 ${produto.titulo}\n` +
-                        `💰 Preço: R$ ${produto.preco}\n\n` +
-                        `⚡ Aproveite a promoção!`;
+                        `💰 Preço: R$ ${produto.preco}\n` +
+                        `🔥 Desconto: ${produto.desconto}% OFF\n\n` +
+                        `⚡ Corre que está barato!`;
 
                     const botoes = {
                         inline_keyboard: [
@@ -88,7 +89,7 @@ export async function onRequestPost(context) {
                         await sendTelegramMessage(TELEGRAM_TOKEN, chatId, legenda, botoes);
                     }
                 } else {
-                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ A API da Shopee não retornou ofertas neste momento. Tente clicar no botão novamente em instantes.");
+                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Não encontrei nenhuma oferta forte (acima de 50% de desconto) neste momento. Tente novamente em instantes.");
                 }
             }
             return new Response("OK", { status: 200 });
@@ -114,17 +115,26 @@ async function answerCallback(token, callbackId) {
     } catch (e) {}
 }
 
-// Consulta GraphQL oficial da Shopee (assinatura SHA-256 correta)
+// Consulta GraphQL oficial da Shopee (só produtos com desconto alto)
 async function buscarOfertaShopee(keyword, appId, secret) {
     try {
         const query = `
             query {
-                productOfferV2(keyword: "${keyword}", limit: 10, page: 1) {
+                productOfferV2(
+                    keyword: "${keyword}",
+                    listType: 0,
+                    sortType: 1,
+                    page: 1,
+                    limit: 30
+                ) {
                     nodes {
                         productName
-                        price
+                        priceMin
+                        priceMax
+                        priceDiscountRate
                         offerLink
                         imageUrl
+                        sales
                     }
                 }
             }
@@ -133,7 +143,7 @@ async function buscarOfertaShopee(keyword, appId, secret) {
         const timestamp = Math.floor(Date.now() / 1000);
         const payload = JSON.stringify({ query });
 
-        // Assinatura correta: SHA-256 simples (não HMAC)
+        // Assinatura correta: SHA-256 simples
         const baseString = appId + timestamp + payload + secret;
         const encoder = new TextEncoder();
         const data = encoder.encode(baseString);
@@ -159,18 +169,31 @@ async function buscarOfertaShopee(keyword, appId, secret) {
             return null;
         }
 
-        const produtos = dataResp?.data?.productOfferV2?.nodes;
+        const produtos = dataResp?.data?.productOfferV2?.nodes || [];
 
-        if (produtos && produtos.length > 0) {
-            const produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
-            return {
-                titulo: produtoSorteado.productName,
-                preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
-                link: produtoSorteado.offerLink,
-                imagem: produtoSorteado.imageUrl
-            };
+        // Filtra só produtos com desconto alto (mínimo 50%)
+        const produtosComDesconto = produtos.filter(p => {
+            const desconto = parseInt(p.priceDiscountRate) || 0;
+            return desconto >= 50;
+        });
+
+        if (produtosComDesconto.length === 0) {
+            return null;
         }
-        return null;
+
+        // Sorteia um produto aleatório entre os que têm desconto alto
+        const produtoSorteado = produtosComDesconto[Math.floor(Math.random() * produtosComDesconto.length)];
+
+        const precoAtual = parseFloat(produtoSorteado.priceMin || produtoSorteado.priceMax || 0).toFixed(2).replace(".", ",");
+        const desconto = parseInt(produtoSorteado.priceDiscountRate) || 0;
+
+        return {
+            titulo: produtoSorteado.productName,
+            preco: precoAtual,
+            desconto: desconto,
+            link: produtoSorteado.offerLink,
+            imagem: produtoSorteado.imageUrl
+        };
     } catch (e) {
         console.log("Erro na busca Shopee:", e.message);
         return null;
