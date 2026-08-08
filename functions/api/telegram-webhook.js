@@ -171,3 +171,5 @@ async function sendTelegramPhoto(token, chatId, photoUrl, caption, replyMarkup =
         })
     });
 }
+
+VERSÃO FINAL BOT
