@@ -102,11 +102,10 @@ async function answerCallback(token, callbackId) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ callback_query_id: callbackId })
         });
-    } catch(e) {}
+    } catch (e) {}
 }
 
-// Consulta GraphQL oficial da Shopee
-async function buscarOfertaShopee(keyword, appId, secret) {
+// Consulta GraphQL oficial da Shopee (assinatura SHA-256 correta)
 async function buscarOfertaShopee(keyword, appId, secret) {
     try {
         const query = `
@@ -123,9 +122,9 @@ async function buscarOfertaShopee(keyword, appId, secret) {
         `;
 
         const timestamp = Math.floor(Date.now() / 1000);
-        const payload = JSON.stringify({ query }); // importante: sem espaços extras
+        const payload = JSON.stringify({ query });
 
-        // === ASSINATURA CORRETA (SHA-256 simples) ===
+        // Assinatura correta: SHA-256 simples (não HMAC)
         const baseString = `\( {appId} \){timestamp}\( {payload} \){secret}`;
         const encoder = new TextEncoder();
         const data = encoder.encode(baseString);
@@ -146,7 +145,6 @@ async function buscarOfertaShopee(keyword, appId, secret) {
 
         const dataResp = await response.json();
 
-        // Debug útil (temporário)
         if (dataResp.errors) {
             console.log("Erro Shopee:", JSON.stringify(dataResp.errors));
             return null;
@@ -165,46 +163,7 @@ async function buscarOfertaShopee(keyword, appId, secret) {
         }
         return null;
     } catch (e) {
-        console.log("Erro na busca:", e.message);
-        return null;
-    }
-}
-
-        const timestamp = Math.floor(Date.now() / 1000);
-        const payload = JSON.stringify({ query });
-
-        const baseString = appId + timestamp + payload + secret;
-        const encoder = new TextEncoder();
-        const keyData = encoder.encode(secret);
-        const messageData = encoder.encode(baseString);
-
-        const cryptoKey = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-        const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
-        const signature = Array.from(new Uint8Array(signatureBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
-
-        const response = await fetch("https://open-api.affiliate.shopee.com.br/graphql", {
-            method: "POST",
-            headers: { 
-                "Content-Type": "application/json", 
-                "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}` 
-            },
-            body: payload
-        });
-
-        const data = await response.json();
-        const produtos = data?.data?.productOfferV2?.nodes;
-
-        if (produtos && produtos.length > 0) {
-            const produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
-            return {
-                titulo: produtoSorteado.productName,
-                preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
-                link: produtoSorteado.offerLink,
-                imagem: produtoSorteado.imageUrl
-            };
-        }
-        return null;
-    } catch (e) {
+        console.log("Erro na busca Shopee:", e.message);
         return null;
     }
 }
@@ -238,4 +197,4 @@ async function sendTelegramPhoto(token, chatId, photoUrl, caption, replyMarkup =
             })
         });
     } catch (e) {}
-            }
+}
