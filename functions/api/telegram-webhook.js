@@ -4,63 +4,58 @@ export async function onRequestPost(context) {
     const SHOPEE_APP_ID = env.SHOPEE_APP_ID;
     const SHOPEE_SECRET = env.SHOPEE_SECRET;
 
+    let chatId = null;
+
     try {
         const update = await request.json();
 
-        // 1. Tratamento para mensagens de texto (ex: /start)
-        if (update.message) {
-            const chatId = update.message.chat.id;
-            const text = update.message.text || "";
+        if (update.message) chatId = update.message.chat.id;
+        if (update.callback_query) chatId = update.callback_query.message.chat.id;
 
-            if (text.startsWith("/start")) {
-                await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
-                    "🔥 *RADAR DE OFERTAS SHOPEE EM TEMPO REAL!*\n\n" +
-                    "Eu busco no catálogo da Shopee as melhores promoções e descontos do momento.\n\n" +
-                    "👇 Escolha um nicho para realizar uma varredura ao vivo:",
-                    {
-                        inline_keyboard: [
-                            [{ text: "🏠 Casa & Cozinha", callback_data: "nicho_casa" }],
-                            [{ text: "📱 Eletrônicos & Tech", callback_data: "nicho_tech" }],
-                            [{ text: "👗 Moda & Acessórios", callback_data: "nicho_moda" }]
-                        ]
-                    }
-                );
-            }
+        // 1. Comando /start
+        if (update.message && update.message.text && update.message.text.startsWith("/start")) {
+            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
+                "🔥 *RADAR DE OFERTAS SHOPEE EM TEMPO REAL!*\n\n" +
+                "👇 Escolha um nicho para realizar uma varredura ao vivo:",
+                {
+                    inline_keyboard: [
+                        [{ text: "🏠 Casa & Cozinha", callback_data: "nicho_casa" }],
+                        [{ text: "📱 Eletrônicos & Tech", callback_data: "nicho_tech" }],
+                        [{ text: "👗 Moda & Acessórios", callback_data: "nicho_moda" }]
+                    ]
+                }
+            );
+            return new Response("OK", { status: 200 });
         }
 
-        // 2. Tratamento para cliques nos botões (Varredura na Shopee)
+        // 2. Clique nos botões
         if (update.callback_query) {
-            const callback = update.callback_query;
-            const chatId = callback.message.chat.id;
-            const action = callback.data;
-
+            const action = update.callback_query.data;
             let keyword = "";
             let nomeNicho = "";
 
-            if (action === "nicho_casa") {
-                keyword = "casa e cozinha";
-                nomeNicho = "🏠 Casa & Cozinha";
-            } else if (action === "nicho_tech") {
-                keyword = "eletronicos";
-                nomeNicho = "📱 Eletrônicos & Tech";
-            } else if (action === "nicho_moda") {
-                keyword = "moda";
-                nomeNicho = "👗 Moda & Acessórios";
-            }
+            if (action === "nicho_casa") { keyword = "casa e cozinha"; nomeNicho = "🏠 Casa & Cozinha"; }
+            if (action === "nicho_tech") { keyword = "eletronicos"; nomeNicho = "📱 Eletrônicos & Tech"; }
+            if (action === "nicho_moda") { keyword = "moda"; nomeNicho = "👗 Moda & Acessórios"; }
 
             if (keyword) {
-                // Mensagem de busca em andamento
+                // Avise o usuário que a busca começou
                 await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `🔎 *Varrendo o catálogo da Shopee para ${nomeNicho}...*`);
 
-                // Busca a oferta real na API GraphQL da Shopee
+                // Verifica se as chaves da Shopee foram cadastradas
+                if (!SHOPEE_APP_ID || !SHOPEE_SECRET) {
+                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ *Faltam as chaves da Shopee!* Verifique se cadastrou `SHOPEE_APP_ID` e `SHOPEE_SECRET` na Cloudflare.");
+                    return new Response("OK", { status: 200 });
+                }
+
                 const produto = await buscarOfertaShopee(keyword, SHOPEE_APP_ID, SHOPEE_SECRET);
 
                 if (produto) {
                     const legenda = 
-                        `🎯 *OFERTA ENCONTRADA EM TEMPO REAL!*\n\n` +
+                        `🎯 *OFERTA ENCONTRADA!*\n\n` +
                         `📦 *${produto.titulo}*\n` +
                         `💰 *Preço:* R$ ${produto.preco}\n\n` +
-                        `⚡ *Link promocional gerado com sucesso!*`;
+                        `⚡ *Link promocional gerado!*`;
 
                     const botoes = {
                         inline_keyboard: [
@@ -75,25 +70,27 @@ export async function onRequestPost(context) {
                         await sendTelegramMessage(TELEGRAM_TOKEN, chatId, legenda, botoes);
                     }
                 } else {
-                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ *Aviso:* Não consegui buscar ofertas da Shopee. Verifique se cadastrou o `SHOPEE_APP_ID` e `SHOPEE_SECRET` nas Variáveis de Ambiente do Cloudflare!");
+                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ *A API da Shopee não retornou produtos nesse momento.* Clique novamente para tentar outro item.");
                 }
             }
         }
 
         return new Response("OK", { status: 200 });
     } catch (err) {
+        // Se der qualquer erro no código, avisa no Telegram!
+        if (chatId && TELEGRAM_TOKEN) {
+            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `❌ *Erro interno:* ${err.message}`);
+        }
         return new Response("OK", { status: 200 });
     }
 }
 
-// 🌐 Função que consulta a API GraphQL da Shopee em tempo real
+// 🌐 Busca na API GraphQL da Shopee
 async function buscarOfertaShopee(keyword, appId, secret) {
-    if (!appId || !secret) return null;
-
     try {
         const query = `
             query {
-                productOfferV2(keyword: "${keyword}", limit: 15, page: 1) {
+                productOfferV2(keyword: "${keyword}", limit: 10, page: 1) {
                     nodes {
                         productName
                         price
@@ -107,7 +104,6 @@ async function buscarOfertaShopee(keyword, appId, secret) {
         const timestamp = Math.floor(Date.now() / 1000);
         const payload = JSON.stringify({ query });
 
-        // Gera a assinatura HMAC-SHA256 exigida pela Shopee
         const baseString = appId + timestamp + payload + secret;
         const encoder = new TextEncoder();
         const keyData = encoder.encode(secret);
@@ -130,7 +126,6 @@ async function buscarOfertaShopee(keyword, appId, secret) {
         const produtos = data?.data?.productOfferV2?.nodes;
 
         if (produtos && produtos.length > 0) {
-            // Sorteia 1 produto dos resultados para variar as ofertas a cada clique
             const produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
             return {
                 titulo: produtoSorteado.productName,
@@ -146,7 +141,6 @@ async function buscarOfertaShopee(keyword, appId, secret) {
     }
 }
 
-// 💬 Auxiliares do Telegram
 async function sendTelegramMessage(token, chatId, text, replyMarkup = null) {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
