@@ -1,131 +1,175 @@
 export async function onRequestPost(context) {
     const { request, env } = context;
     const TELEGRAM_TOKEN = env.TELEGRAM_BOT_TOKEN;
+    const SHOPEE_APP_ID = env.SHOPEE_APP_ID;
+    const SHOPEE_SECRET = env.SHOPEE_SECRET;
 
     try {
         const update = await request.json();
 
-        // Extrai o chat_id e o texto/ação do usuário
-        let chatId, dataAction, textCommand;
-
+        // 1. Tratamento para mensagens de texto (ex: /start)
         if (update.message) {
-            chatId = update.message.chat.id;
-            textCommand = update.message.text;
-        } else if (update.callback_query) {
-            chatId = update.callback_query.message.chat.id;
-            dataAction = update.callback_query.data;
-        }
+            const chatId = update.message.chat.id;
+            const text = update.message.text || "";
 
-        if (!chatId) return new Response("OK", { status: 200 });
-
-        // 1. Comando Inicial (/start)
-        if (textCommand === '/start') {
-            await sendTelegramMenu(TELEGRAM_TOKEN, chatId, 
-                `🤖 *Bem-vindo ao Radar de Ofertas Shopee!*\n\n` +
-                `Você está no modo *Nicho Geral* com direito a 3 ofertas gratuitas por dia.\n\n` +
-                `💡 *Você tem 1 Teste Grátis* para experimentar um nicho específico!`
-            );
-            return new Response("OK", { status: 200 });
-        }
-
-        // 2. Ação: Buscar Oferta Geral (3x por dia)
-        if (dataAction === 'busca_geral') {
-            // Lógica simulada de ofertas do Nicho Geral
-            const ofertaGeral = `🚨 *OFERTA NO NICHO GERAL!*\n\n✨ *Fone Bluetooth Sem Fio*\n🔥 *Por apenas R$ 29,90*\n\n🛒 https://shope.ee/exemplo`;
-            
-            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, ofertaGeral, [
-                [{ text: "🎲 Outra Oferta Geral", callback_data: "busca_geral" }],
-                [{ text: "🎯 Testar Nicho Específico (1x Grátis)", callback_data: "menu_nichos" }]
-            ]);
-            return new Response("OK", { status: 200 });
-        }
-
-        // 3. Ação: Abrir Menu de Nichos (Degustação)
-        if (dataAction === 'menu_nichos') {
-            const menuText = `🎯 *Escolha seu Nicho de Teste (1x Grátis):*\n\n` +
-                             `Escolha abaixo qual categoria você quer testar agora:`;
-            
-            const nichoButtons = [
-                [{ text: "🏠 Casa & Cozinha", callback_data: "nicho_casa" }],
-                [{ text: "📱 Eletrônicos & Tech", callback_data: "nicho_tech" }],
-                [{ text: "👗 Moda & Acessórios", callback_data: "nicho_moda" }],
-                [{ text: "⬅️ Voltar ao Nicho Geral", callback_data: "busca_geral" }]
-            ];
-
-            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, menuText, nichoButtons);
-            return new Response("OK", { status: 200 });
-        }
-
-        // 4. Ação: Seleção do Nicho de Teste ou Bloqueio
-        if (dataAction && dataAction.startsWith('nicho_')) {
-            // Aqui o sistema verifica se ele já usou o teste (Lógica com KV ou estado)
-            const jaUsouTeste = false; // Mudar para true quando ele já tiver gasto a tentativa
-
-            if (!jaUsouTeste) {
-                // Entrega a oferta no nicho escolhido e gasta o teste
-                const ofertaNicho = `🎯 *OFERTA SEGMENTADA (Teste de Nicho)*\n\n✨ *Jogo de Panelas Antiaderente 5 Peças*\n🔥 *De ~R$ 199~ Por R$ 89,90*\n\n🛒 https://shope.ee/exemplo`;
-                
-                await sendTelegramMessage(TELEGRAM_TOKEN, chatId, ofertaNicho, [
-                    [{ text: "⚡ Quer continuar neste Nicho? Libere o PRO", callback_data: "oferta_pro" }],
-                    [{ text: "🎲 Voltar para Busca Geral Grátis", callback_data: "busca_geral" }]
-                ]);
-            } else {
-                // Trava: Caso ele tente testar o nicho de novo
-                const avisoTrava = `🔒 *Seu teste gratuito de nicho expirou!*\n\n` +
-                                   `Seu perfil retornou automaticamente para o *Nicho Geral* (3 ofertas diárias).\n\n` +
-                                   `Para travar seu robô em um nicho específico permanentemente e ter buscas ilimitadas, assine o PRO ou faça uma recarga no Pix.`;
-
-                await sendTelegramMessage(TELEGRAM_TOKEN, chatId, avisoTrava, [
-                    [{ text: "💳 Recarga +5 Ofertas no Pix (R$ 3,90)", callback_data: "gerar_pix" }],
-                    [{ text: "👑 Assinar Plano PRO Mensal", callback_data: "oferta_pro" }],
-                    [{ text: "🎲 Continuar no Geral Grátis", callback_data: "busca_geral" }]
-                ]);
+            if (text.startsWith("/start")) {
+                await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
+                    "🔥 *RADAR DE OFERTAS SHOPEE EM TEMPO REAL!*\n\n" +
+                    "Eu busco no catálogo da Shopee as melhores promoções e descontos do momento.\n\n" +
+                    "👇 Escolha um nicho para realizar uma varredura ao vivo:",
+                    {
+                        inline_keyboard: [
+                            [{ text: "🏠 Casa & Cozinha", callback_data: "nicho_casa" }],
+                            [{ text: "📱 Eletrônicos & Tech", callback_data: "nicho_tech" }],
+                            [{ text: "👗 Moda & Acessórios", callback_data: "nicho_moda" }]
+                        ]
+                    }
+                );
             }
-            return new Response("OK", { status: 200 });
         }
 
-        // 5. Oferta PRO / Pix
-        if (dataAction === 'oferta_pro' || dataAction === 'gerar_pix') {
-            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
-                `⚡ *RECARGA RÁPIDA DE OFERTAS VIA PIX*\n\n` +
-                `Clique no botão abaixo para gerar o código *Pix Copia e Cola* de R$ 3,90 e liberar +5 buscas no seu nicho escolhido imediatamente!`,
-                [[{ text: "📲 Gerar Chave Pix R$ 3,90", callback_data: "confirmar_pix" }]]
-            );
-            return new Response("OK", { status: 200 });
+        // 2. Tratamento para cliques nos botões (Varredura na Shopee)
+        if (update.callback_query) {
+            const callback = update.callback_query;
+            const chatId = callback.message.chat.id;
+            const action = callback.data;
+
+            let keyword = "";
+            let nomeNicho = "";
+
+            if (action === "nicho_casa") {
+                keyword = "casa e cozinha";
+                nomeNicho = "🏠 Casa & Cozinha";
+            } else if (action === "nicho_tech") {
+                keyword = "eletronicos";
+                nomeNicho = "📱 Eletrônicos & Tech";
+            } else if (action === "nicho_moda") {
+                keyword = "moda";
+                nomeNicho = "👗 Moda & Acessórios";
+            }
+
+            if (keyword) {
+                // Mensagem de busca em andamento
+                await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `🔎 *Varrendo o catálogo da Shopee para ${nomeNicho}...*`);
+
+                // Busca a oferta real na API GraphQL da Shopee
+                const produto = await buscarOfertaShopee(keyword, SHOPEE_APP_ID, SHOPEE_SECRET);
+
+                if (produto) {
+                    const legenda = 
+                        `🎯 *OFERTA ENCONTRADA EM TEMPO REAL!*\n\n` +
+                        `📦 *${produto.titulo}*\n` +
+                        `💰 *Preço:* R$ ${produto.preco}\n\n` +
+                        `⚡ *Link promocional gerado com sucesso!*`;
+
+                    const botoes = {
+                        inline_keyboard: [
+                            [{ text: "🛒 Comprar na Shopee", url: produto.link }],
+                            [{ text: "🔄 Buscar Outra Oferta", callback_data: action }]
+                        ]
+                    };
+
+                    if (produto.imagem) {
+                        await sendTelegramPhoto(TELEGRAM_TOKEN, chatId, produto.imagem, legenda, botoes);
+                    } else {
+                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, legenda, botoes);
+                    }
+                } else {
+                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ *Aviso:* Não consegui buscar ofertas da Shopee. Verifique se cadastrou o `SHOPEE_APP_ID` e `SHOPEE_SECRET` nas Variáveis de Ambiente do Cloudflare!");
+                }
+            }
         }
 
         return new Response("OK", { status: 200 });
-
     } catch (err) {
-        console.error("Erro no Webhook:", err);
         return new Response("OK", { status: 200 });
     }
 }
 
-// Funções Auxiliares de Envio para o Telegram
+// 🌐 Função que consulta a API GraphQL da Shopee em tempo real
+async function buscarOfertaShopee(keyword, appId, secret) {
+    if (!appId || !secret) return null;
 
-async function sendTelegramMenu(token, chatId, text) {
-    const buttons = [
-        [{ text: "🎲 Ver Ofertas no Nicho Geral (3/3 hoje)", callback_data: "busca_geral" }],
-        [{ text: "🎯 Testar Nicho Específico (1x Grátis)", callback_data: "menu_nichos" }],
-        [{ text: "💳 Recarga Pix / Planos PRO", callback_data: "oferta_pro" }]
-    ];
-    return sendTelegramMessage(token, chatId, text, buttons);
+    try {
+        const query = `
+            query {
+                productOfferV2(keyword: "${keyword}", limit: 15, page: 1) {
+                    nodes {
+                        productName
+                        price
+                        offerLink
+                        imageUrl
+                    }
+                }
+            }
+        `;
+
+        const timestamp = Math.floor(Date.now() / 1000);
+        const payload = JSON.stringify({ query });
+
+        // Gera a assinatura HMAC-SHA256 exigida pela Shopee
+        const baseString = appId + timestamp + payload + secret;
+        const encoder = new TextEncoder();
+        const keyData = encoder.encode(secret);
+        const messageData = encoder.encode(baseString);
+
+        const cryptoKey = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+        const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
+        const signature = Array.from(new Uint8Array(signatureBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+        const response = await fetch("https://open-api.affiliate.shopee.com.br/graphql", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`
+            },
+            body: payload
+        });
+
+        const data = await response.json();
+        const produtos = data?.data?.productOfferV2?.nodes;
+
+        if (produtos && produtos.length > 0) {
+            // Sorteia 1 produto dos resultados para variar as ofertas a cada clique
+            const produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
+            return {
+                titulo: produtoSorteado.productName,
+                preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
+                link: produtoSorteado.offerLink,
+                imagem: produtoSorteado.imageUrl
+            };
+        }
+
+        return null;
+    } catch (e) {
+        return null;
+    }
 }
 
-async function sendTelegramMessage(token, chatId, text, inlineKeyboard) {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    await fetch(url, {
+// 💬 Auxiliares do Telegram
+async function sendTelegramMessage(token, chatId, text, replyMarkup = null) {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             chat_id: chatId,
             text: text,
             parse_mode: "Markdown",
-            reply_markup: {
-                inline_keyboard: inlineKeyboard
-            }
+            reply_markup: replyMarkup
         })
     });
 }
 
+async function sendTelegramPhoto(token, chatId, photoUrl, caption, replyMarkup = null) {
+    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: chatId,
+            photo: photoUrl,
+            caption: caption,
+            parse_mode: "Markdown",
+            reply_markup: replyMarkup
+        })
+    });
+}
