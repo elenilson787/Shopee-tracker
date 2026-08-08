@@ -18,7 +18,7 @@ export async function onRequestPost(context) {
 
         // 1. Comando /start
         if (update.message && update.message.text && update.message.text.startsWith("/start")) {
-            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
+            await sendTelegramMessage(TELEGRAM_TOKEN, chatId,
                 "🔥 RADAR DE OFERTAS SHOPEE EM TEMPO REAL!\n\nEscolha abaixo um nicho para realizar uma varredura ao vivo:",
                 {
                     inline_keyboard: [
@@ -42,9 +42,18 @@ export async function onRequestPost(context) {
             let keyword = "";
             let nomeNicho = "";
 
-            if (action === "nicho_casa") { keyword = "casa e cozinha"; nomeNicho = "Casa & Cozinha"; }
-            if (action === "nicho_tech") { keyword = "eletronicos"; nomeNicho = "Eletrônicos & Tech"; }
-            if (action === "nicho_moda") { keyword = "moda"; nomeNicho = "Moda & Acessórios"; }
+            if (action === "nicho_casa") {
+                keyword = "casa e cozinha";
+                nomeNicho = "Casa & Cozinha";
+            }
+            if (action === "nicho_tech") {
+                keyword = "eletronicos";
+                nomeNicho = "Eletrônicos & Tech";
+            }
+            if (action === "nicho_moda") {
+                keyword = "moda";
+                nomeNicho = "Moda & Acessórios";
+            }
 
             if (keyword && chatId) {
                 // Notificação inicial de busca
@@ -60,7 +69,7 @@ export async function onRequestPost(context) {
                 const produto = await buscarOfertaShopee(keyword, SHOPEE_APP_ID, SHOPEE_SECRET);
 
                 if (produto) {
-                    const legenda = 
+                    const legenda =
                         `🎯 OFERTA ENCONTRADA!\n\n` +
                         `📦 ${produto.titulo}\n` +
                         `💰 Preço: R$ ${produto.preco}\n\n` +
@@ -125,10 +134,10 @@ async function buscarOfertaShopee(keyword, appId, secret) {
         const payload = JSON.stringify({ query });
 
         // Assinatura correta: SHA-256 simples (não HMAC)
-        const baseString = `\( {appId} \){timestamp}\( {payload} \){secret}`;
+        const baseString = appId + timestamp + payload + secret;
         const encoder = new TextEncoder();
         const data = encoder.encode(baseString);
-        
+
         const hashBuffer = await crypto.subtle.digest("SHA-256", data);
         const signature = Array.from(new Uint8Array(hashBuffer))
             .map(b => b.toString(16).padStart(2, "0"))
@@ -136,9 +145,9 @@ async function buscarOfertaShopee(keyword, appId, secret) {
 
         const response = await fetch("https://open-api.affiliate.shopee.com.br/graphql", {
             method: "POST",
-            headers: { 
-                "Content-Type": "application/json", 
-                "Authorization": `SHA256 Credential=\( {appId}, Timestamp= \){timestamp}, Signature=${signature}` 
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "SHA256 Credential=" + appId + ", Timestamp=" + timestamp + ", Signature=" + signature
             },
             body: payload
         });
