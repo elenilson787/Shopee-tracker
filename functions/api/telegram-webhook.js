@@ -4,12 +4,20 @@ export async function onRequestPost(context) {
     const SHOPEE_APP_ID = env.SHOPEE_APP_ID;
     const SHOPEE_SECRET = env.SHOPEE_SECRET;
 
+    let chatId = null;
+
     try {
         const update = await request.json();
 
-        // 1. Mensagem /start
+        // Extrai o chatId com segurança
+        if (update.message && update.message.chat) {
+            chatId = update.message.chat.id;
+        } else if (update.callback_query && update.callback_query.message && update.callback_query.message.chat) {
+            chatId = update.callback_query.message.chat.id;
+        }
+
+        // 1. Comando /start
         if (update.message && update.message.text && update.message.text.startsWith("/start")) {
-            const chatId = update.message.chat.id;
             await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
                 "🔥 RADAR DE OFERTAS SHOPEE EM TEMPO REAL!\n\nEscolha abaixo um nicho para realizar uma varredura ao vivo:",
                 {
@@ -26,10 +34,9 @@ export async function onRequestPost(context) {
         // 2. Clique nos botões (Callback Query)
         if (update.callback_query) {
             const callback = update.callback_query;
-            const chatId = callback.message.chat.id;
             const action = callback.data;
 
-            // Destrava o botão do aplicativo imediatamente
+            // Destrava o reloginho do botão no Telegram imediatamente
             await answerCallback(TELEGRAM_TOKEN, callback.id);
 
             let keyword = "";
@@ -39,14 +46,17 @@ export async function onRequestPost(context) {
             if (action === "nicho_tech") { keyword = "eletronicos"; nomeNicho = "Eletrônicos & Tech"; }
             if (action === "nicho_moda") { keyword = "moda"; nomeNicho = "Moda & Acessórios"; }
 
-            if (keyword) {
-                await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `🔎 Varrendo a Shopee para ${nomeNicho}...`);
+            if (keyword && chatId) {
+                // Notificação inicial de busca
+                await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `🔎 Varrendo o catálogo da Shopee para ${nomeNicho}...`);
 
+                // Valida se as variáveis existem na Cloudflare
                 if (!SHOPEE_APP_ID || !SHOPEE_SECRET) {
-                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Faltam as chaves SHOPEE_APP_ID ou SHOPEE_SECRET salvas na Cloudflare!");
+                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Atenção: As variáveis SHOPEE_APP_ID ou SHOPEE_SECRET não foram encontradas na Cloudflare.");
                     return new Response("OK", { status: 200 });
                 }
 
+                // Busca a oferta real na Shopee
                 const produto = await buscarOfertaShopee(keyword, SHOPEE_APP_ID, SHOPEE_SECRET);
 
                 if (produto) {
@@ -69,7 +79,7 @@ export async function onRequestPost(context) {
                         await sendTelegramMessage(TELEGRAM_TOKEN, chatId, legenda, botoes);
                     }
                 } else {
-                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ A API da Shopee não retornou ofertas agora. Tente clicar no botão novamente.");
+                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ A API da Shopee não retornou ofertas neste momento. Tente clicar no botão novamente em instantes.");
                 }
             }
             return new Response("OK", { status: 200 });
@@ -77,11 +87,14 @@ export async function onRequestPost(context) {
 
         return new Response("OK", { status: 200 });
     } catch (err) {
+        if (chatId && TELEGRAM_TOKEN) {
+            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `❌ Erro de execução: ${err.message}`);
+        }
         return new Response("OK", { status: 200 });
     }
 }
 
-// Destrava o relógio de espera no botão
+// Responde o clique para liberar a interface do aplicativo
 async function answerCallback(token, callbackId) {
     try {
         await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
@@ -92,7 +105,7 @@ async function answerCallback(token, callbackId) {
     } catch(e) {}
 }
 
-// Busca GraphQL na API da Shopee
+// Consulta GraphQL oficial da Shopee
 async function buscarOfertaShopee(keyword, appId, secret) {
     try {
         const query = `
@@ -122,9 +135,9 @@ async function buscarOfertaShopee(keyword, appId, secret) {
 
         const response = await fetch("https://open-api.affiliate.shopee.com.br/graphql", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`
+            headers: { 
+                "Content-Type": "application/json", 
+                "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}` 
             },
             body: payload
         });
@@ -147,27 +160,33 @@ async function buscarOfertaShopee(keyword, appId, secret) {
     }
 }
 
+// Função de envio seguro (Texto)
 async function sendTelegramMessage(token, chatId, text, replyMarkup = null) {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            chat_id: chatId,
-            text: text,
-            reply_markup: replyMarkup
-        })
-    });
+    try {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text: text,
+                reply_markup: replyMarkup
+            })
+        });
+    } catch (e) {}
 }
 
+// Função de envio seguro (Foto)
 async function sendTelegramPhoto(token, chatId, photoUrl, caption, replyMarkup = null) {
-    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            chat_id: chatId,
-            photo: photoUrl,
-            caption: caption,
-            reply_markup: replyMarkup
-        })
-    });
-}
+    try {
+        await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                chat_id: chatId,
+                photo: photoUrl,
+                caption: caption,
+                reply_markup: replyMarkup
+            })
+        });
+    } catch (e) {}
+            }
