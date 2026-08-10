@@ -1,21 +1,8 @@
-// Tabela de sub-palavras-chave para varredura variada
-const SUB_KEYWORDS = {
-    casa: [
-        "panela antiaderente", "utensilios cozinha inox", "organizadores casa", 
-        "fritadeira air fryer", "jogo de pratos", "luminaria led", "mop giratorio", 
-        "jogo de cama casal", "liquidificador", "garrafa termica", "copo termico",
-        "kit de facas", "suporte temperos", "almofadas decorativas"
-    ],
-    tech: [
-        "fone de ouvido bluetooth", "smartwatch esportivo", "carregador rapido usb", 
-        "suporte para celular", "teclado gamer", "caixa de som bluetooth", 
-        "mouse sem fio", "ring light", "cabo tipo c", "fone gamer", "hub usb"
-    ],
-    moda: [
-        "vestido feminino elegante", "tenis masculino esportivo", "bolsa feminina couro", 
-        "oculos de sol unisex", "camiseta masculina", "relogio masculino luxo", 
-        "conjunto feminino", "mochila impermeavel", "carteira masculina"
-    ]
+// Tabela de palavras-chave para varredura variada
+const KEYWORDS = {
+    casa: ["cozinha", "casa", "panela", "organizador", "decoracao", "cama", "banho"],
+    tech: ["fone", "celular", "smartwatch", "carregador", "som", "teclado", "eletronicos"],
+    moda: ["vestido", "tenis", "bolsa", "relogio", "oculos", "camiseta", "moda"]
 };
 
 export async function onRequestPost(context) {
@@ -128,7 +115,6 @@ export async function onRequestPost(context) {
                             ]
                         };
 
-                        // Tenta enviar com foto; se a foto falhar, envia como mensagem simples
                         await sendTelegramPhotoOrFallback(TELEGRAM_TOKEN, chatId, produto.imagem, legenda, botoes);
                     } else {
                         await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Nenhuma oferta retornada nesta busca. Clique no botão abaixo para tentar outra opção!", {
@@ -152,18 +138,28 @@ export async function onRequestPost(context) {
     }
 }
 
-// Algoritmo de busca com rotação e anti-repetição
+// Busca inteligente com fallback automático
 async function buscarOfertaInteligente(nicho, estrategia, appId, secret) {
+    const lista = KEYWORDS[nicho] || ["promocao"];
+    const kwSorteada = lista[Math.floor(Math.random() * lista.length)];
+    const pgSorteada = Math.floor(Math.random() * 2) + 1; // Páginas 1 ou 2
+
+    // Tenta com a palavra sorteada
+    let produto = await fazerQueryShopee(kwSorteada, pgSorteada, estrategia, appId, secret);
+
+    // Fallback: Se não veio nada, tenta com a palavra principal na página 1
+    if (!produto) {
+        produto = await fazerQueryShopee(lista[0], 1, estrategia, appId, secret);
+    }
+
+    return produto;
+}
+
+async function fazerQueryShopee(keyword, page, estrategia, appId, secret) {
     try {
-        const keywordsList = SUB_KEYWORDS[nicho] || ["ofertas"];
-        const keywordSorteada = keywordsList[Math.floor(Math.random() * keywordsList.length)];
-        const pageSorteada = Math.floor(Math.random() * 3) + 1; // Páginas 1 a 3
-
-        const sortType = estrategia === "comissao" ? 5 : 2;
-
         const query = `
             query {
-                productOfferV2(keyword: "${keywordSorteada}", limit: 20, page: ${pageSorteada}, sortType: ${sortType}) {
+                productOfferV2(keyword: "${keyword}", limit: 20, page: ${page}) {
                     nodes {
                         productName
                         price
@@ -199,13 +195,26 @@ async function buscarOfertaInteligente(nicho, estrategia, appId, secret) {
         const produtos = data?.data?.productOfferV2?.nodes;
 
         if (produtos && produtos.length > 0) {
-            const produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
-            return {
-                titulo: produtoSorteado.productName || "Produto Shopee",
-                preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
-                link: produtoSorteado.offerLink,
-                imagem: produtoSorteado.imageUrl
-            };
+            let produtoSorteado = null;
+
+            if (estrategia === "comissao") {
+                // Ordena pelos itens de maior preço para garantir maior comissão em R$
+                const ordenados = [...produtos].sort((a, b) => parseFloat(b.price || 0) - parseFloat(a.price || 0));
+                const top5 = ordenados.slice(0, Math.min(5, ordenados.length));
+                produtoSorteado = top5[Math.floor(Math.random() * top5.length)];
+            } else {
+                // Sorteia 1 aleatório dos 20 produtos retornados
+                produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
+            }
+
+            if (produtoSorteado && produtoSorteado.offerLink) {
+                return {
+                    titulo: produtoSorteado.productName || "Produto Shopee",
+                    preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
+                    link: produtoSorteado.offerLink,
+                    imagem: produtoSorteado.imageUrl
+                };
+            }
         }
         return null;
     } catch (e) {
@@ -237,7 +246,6 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup = null) {
     } catch (e) {}
 }
 
-// Envia a foto com fallback para mensagem de texto caso a URL da imagem falhe
 async function sendTelegramPhotoOrFallback(token, chatId, photoUrl, caption, replyMarkup = null) {
     let enviouComFoto = false;
 
@@ -258,7 +266,6 @@ async function sendTelegramPhotoOrFallback(token, chatId, photoUrl, caption, rep
         } catch (e) {}
     }
 
-    // Se a foto falhar, envia o texto com o link e botão sem travar!
     if (!enviouComFoto) {
         await sendTelegramMessage(token, chatId, caption, replyMarkup);
     }
