@@ -1,15 +1,15 @@
 // Tabela de palavras-chave para varredura variada
 const KEYWORDS = {
-    casa: ["cozinha", "casa", "panela", "organizador", "decoracao", "cama", "banho"],
-    tech: ["fone", "celular", "smartwatch", "carregador", "som", "teclado", "eletronicos"],
-    moda: ["vestido", "tenis", "bolsa", "relogio", "oculos", "camiseta", "moda"]
+    casa: ["panela", "cozinha", "organizador", "cama", "decoracao", "copo termico", "utensilios"],
+    tech: ["fone bluetooth", "smartwatch", "carregador", "caixa de som", "teclado", "suporte celular"],
+    moda: ["vestido", "tenis", "bolsa", "relogio", "oculos de sol", "camiseta", "mochila"]
 };
 
 export async function onRequestPost(context) {
     const { request, env } = context;
-    const TELEGRAM_TOKEN = env.TELEGRAM_BOT_TOKEN;
-    const SHOPEE_APP_ID = env.SHOPEE_APP_ID;
-    const SHOPEE_SECRET = env.SHOPEE_SECRET;
+    const TELEGRAM_TOKEN = (env.TELEGRAM_BOT_TOKEN || "").trim();
+    const SHOPEE_APP_ID = (env.SHOPEE_APP_ID || "").trim();
+    const SHOPEE_SECRET = (env.SHOPEE_SECRET || "").trim();
 
     let chatId = null;
 
@@ -91,13 +91,23 @@ export async function onRequestPost(context) {
                     await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `🔎 Varrendo a Shopee para ${nomeNicho} (${tagEstrategia})...`);
 
                     if (!SHOPEE_APP_ID || !SHOPEE_SECRET) {
-                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Atenção: As variáveis SHOPEE_APP_ID e SHOPEE_SECRET não foram cadastradas na Cloudflare.");
+                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Atenção: As variáveis SHOPEE_APP_ID ou SHOPEE_SECRET não foram cadastradas na Cloudflare.");
                         return new Response("OK", { status: 200 });
                     }
 
-                    const produto = await buscarOfertaInteligente(nichoKey, tipoEstrategia, SHOPEE_APP_ID, SHOPEE_SECRET);
+                    const resultado = await buscarOfertaInteligente(nichoKey, tipoEstrategia, SHOPEE_APP_ID, SHOPEE_SECRET);
 
-                    if (produto) {
+                    // Exibe erro direto da API da Shopee se houver
+                    if (resultado && resultado.erro) {
+                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, 
+                            `⚠️ *Erro de resposta da Shopee:*\n"${resultado.erro}"\n\n` +
+                            "💡 Verifique no painel de Afiliados da Shopee se o seu App ID e Secret estão ativos e corretos."
+                        );
+                        return new Response("OK", { status: 200 });
+                    }
+
+                    if (resultado && resultado.produto) {
+                        const produto = resultado.produto;
                         const tituloLimpo = produto.titulo.replace(/[\*\_\`\[\]]/g, "").trim();
 
                         const legenda = 
@@ -117,7 +127,7 @@ export async function onRequestPost(context) {
 
                         await sendTelegramPhotoOrFallback(TELEGRAM_TOKEN, chatId, produto.imagem, legenda, botoes);
                     } else {
-                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Nenhuma oferta retornada nesta busca. Clique no botão abaixo para tentar outra opção!", {
+                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Nenhuma oferta retornada nesta busca. Clique abaixo para tentar outro item!", {
                             inline_keyboard: [
                                 [{ text: "🔄 Tentar Novamente", callback_data: action }],
                                 [{ text: "🏠 Menu Principal", callback_data: "menu_principal" }]
@@ -138,21 +148,21 @@ export async function onRequestPost(context) {
     }
 }
 
-// Busca inteligente com fallback automático
+// Busca inteligente com diagnóstico de erro
 async function buscarOfertaInteligente(nicho, estrategia, appId, secret) {
     const lista = KEYWORDS[nicho] || ["promocao"];
     const kwSorteada = lista[Math.floor(Math.random() * lista.length)];
-    const pgSorteada = Math.floor(Math.random() * 2) + 1; // Páginas 1 ou 2
+    const pgSorteada = Math.floor(Math.random() * 2) + 1;
 
-    // Tenta com a palavra sorteada
-    let produto = await fazerQueryShopee(kwSorteada, pgSorteada, estrategia, appId, secret);
+    let res = await fazerQueryShopee(kwSorteada, pgSorteada, estrategia, appId, secret);
 
-    // Fallback: Se não veio nada, tenta com a palavra principal na página 1
-    if (!produto) {
-        produto = await fazerQueryShopee(lista[0], 1, estrategia, appId, secret);
+    if (res && res.erro) return res;
+
+    if (!res || !res.produto) {
+        res = await fazerQueryShopee(lista[0], 1, estrategia, appId, secret);
     }
 
-    return produto;
+    return res;
 }
 
 async function fazerQueryShopee(keyword, page, estrategia, appId, secret) {
@@ -163,6 +173,7 @@ async function fazerQueryShopee(keyword, page, estrategia, appId, secret) {
                     nodes {
                         productName
                         price
+                        priceMin
                         offerLink
                         imageUrl
                     }
@@ -192,33 +203,44 @@ async function fazerQueryShopee(keyword, page, estrategia, appId, secret) {
         });
 
         const data = await response.json();
+
+        if (data.errors && data.errors.length > 0) {
+            return { erro: data.errors[0].message || "Erro retornado pela API Shopee" };
+        }
+
         const produtos = data?.data?.productOfferV2?.nodes;
 
         if (produtos && produtos.length > 0) {
             let produtoSorteado = null;
 
             if (estrategia === "comissao") {
-                // Ordena pelos itens de maior preço para garantir maior comissão em R$
-                const ordenados = [...produtos].sort((a, b) => parseFloat(b.price || 0) - parseFloat(a.price || 0));
+                const ordenados = [...produtos].sort((a, b) => {
+                    const precoA = parseFloat(a.price || a.priceMin || 0);
+                    const precoB = parseFloat(b.price || b.priceMin || 0);
+                    return precoB - precoA;
+                });
                 const top5 = ordenados.slice(0, Math.min(5, ordenados.length));
                 produtoSorteado = top5[Math.floor(Math.random() * top5.length)];
             } else {
-                // Sorteia 1 aleatório dos 20 produtos retornados
                 produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
             }
 
             if (produtoSorteado && produtoSorteado.offerLink) {
+                const valorBruto = produtoSorteado.price || produtoSorteado.priceMin || 0;
                 return {
-                    titulo: produtoSorteado.productName || "Produto Shopee",
-                    preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
-                    link: produtoSorteado.offerLink,
-                    imagem: produtoSorteado.imageUrl
+                    produto: {
+                        titulo: produtoSorteado.productName || "Produto Shopee",
+                        preco: parseFloat(valorBruto).toFixed(2).replace(".", ","),
+                        link: produtoSorteado.offerLink,
+                        imagem: produtoSorteado.imageUrl
+                    }
                 };
             }
         }
-        return null;
+
+        return { produto: null };
     } catch (e) {
-        return null;
+        return { erro: `Falha na requisição: ${e.message}` };
     }
 }
 
