@@ -1,3 +1,23 @@
+// Tabela de sub-palavras-chave para varredura variada
+const SUB_KEYWORDS = {
+    casa: [
+        "panela antiaderente", "utensilios cozinha inox", "organizadores casa", 
+        "fritadeira air fryer", "jogo de pratos", "luminaria led", "mop giratorio", 
+        "jogo de cama casal", "liquidificador", "garrafa termica", "copo termico",
+        "kit de facas", "suporte temperos", "almofadas decorativas"
+    ],
+    tech: [
+        "fone de ouvido bluetooth", "smartwatch esportivo", "carregador rapido usb", 
+        "suporte para celular", "teclado gamer", "caixa de som bluetooth", 
+        "mouse sem fio", "ring light", "cabo tipo c", "fone gamer", "hub usb"
+    ],
+    moda: [
+        "vestido feminino elegante", "tenis masculino esportivo", "bolsa feminina couro", 
+        "oculos de sol unisex", "camiseta masculina", "relogio masculino luxo", 
+        "conjunto feminino", "mochila impermeavel", "carteira masculina"
+    ]
+};
+
 export async function onRequestPost(context) {
     const { request, env } = context;
     const TELEGRAM_TOKEN = env.TELEGRAM_BOT_TOKEN;
@@ -9,14 +29,14 @@ export async function onRequestPost(context) {
     try {
         const update = await request.json();
 
-        // Extrai o chatId com segurança
+        // Identifica o chatId
         if (update.message && update.message.chat) {
             chatId = update.message.chat.id;
         } else if (update.callback_query && update.callback_query.message && update.callback_query.message.chat) {
             chatId = update.callback_query.message.chat.id;
         }
 
-        // 1. Comando /start ou Botão Voltar ao Menu
+        // 1. Comando /start ou Menu Principal
         if ((update.message && update.message.text && update.message.text.startsWith("/start")) || 
             (update.callback_query && update.callback_query.data === "menu_principal")) {
             
@@ -38,7 +58,7 @@ export async function onRequestPost(context) {
             return new Response("OK", { status: 200 });
         }
 
-        // 2. Escolha da Estratégia -> Mostra os Nichos
+        // 2. Seleção de Estratégia -> Exibe Nichos
         if (update.callback_query) {
             const callback = update.callback_query;
             const action = callback.data;
@@ -47,15 +67,16 @@ export async function onRequestPost(context) {
 
             if (action === "tipo_comissao" || action === "tipo_novas") {
                 const tipoTexto = action === "tipo_comissao" ? "💰 MAIORES COMISSÕES" : "🔥 OFERTAS NOVAS & RELÂMPAGO";
-                
+                const suf = action === "tipo_comissao" ? "comissao" : "novas";
+
                 await sendTelegramMessage(TELEGRAM_TOKEN, chatId,
                     `${tipoTexto}\n\n` +
                     "Excelente escolha! Agora selecione o Nicho de produtos que você deseja explorar:",
                     {
                         inline_keyboard: [
-                            [{ text: "🏠 Casa & Cozinha", callback_data: `nicho_casa_${action}` }],
-                            [{ text: "📱 Eletrônicos & Tech", callback_data: `nicho_tech_${action}` }],
-                            [{ text: "👗 Moda & Acessórios", callback_data: `nicho_moda_${action}` }],
+                            [{ text: "🏠 Casa & Cozinha", callback_data: `nicho_casa_${suf}` }],
+                            [{ text: "📱 Eletrônicos & Tech", callback_data: `nicho_tech_${suf}` }],
+                            [{ text: "👗 Moda & Acessórios", callback_data: `nicho_moda_${suf}` }],
                             [{ text: "↩️ Voltar ao Menu Principal", callback_data: "menu_principal" }]
                         ]
                     }
@@ -63,7 +84,7 @@ export async function onRequestPost(context) {
                 return new Response("OK", { status: 200 });
             }
 
-            // 3. Execução da Busca Inteligente por Nicho
+            // 3. Clique no Nicho -> Realiza Busca
             if (action.startsWith("nicho_")) {
                 let nichoKey = "";
                 let tipoEstrategia = "";
@@ -73,12 +94,14 @@ export async function onRequestPost(context) {
                 if (action.includes("tech")) { nichoKey = "tech"; nomeNicho = "Eletrônicos & Tech"; }
                 if (action.includes("moda")) { nichoKey = "moda"; nomeNicho = "Moda & Acessórios"; }
 
-                if (action.includes("tipo_comissao")) tipoEstrategia = "comissao";
-                if (action.includes("tipo_novas")) tipoEstrategia = "novas";
+                if (action.includes("comissao")) tipoEstrategia = "comissao";
+                if (action.includes("novas")) tipoEstrategia = "novas";
 
                 if (nichoKey && tipoEstrategia && chatId) {
                     const tagEstrategia = tipoEstrategia === "comissao" ? "💰 Maiores Comissões" : "🔥 Oferta Relâmpago";
-                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `🔎 Varrendo o catálogo da Shopee para ${nomeNicho} (${tagEstrategia})...`);
+
+                    // Notificação imediata de busca
+                    await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `🔎 Varrendo a Shopee para ${nomeNicho} (${tagEstrategia})...`);
 
                     if (!SHOPEE_APP_ID || !SHOPEE_SECRET) {
                         await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Atenção: As variáveis SHOPEE_APP_ID e SHOPEE_SECRET não foram cadastradas na Cloudflare.");
@@ -88,7 +111,6 @@ export async function onRequestPost(context) {
                     const produto = await buscarOfertaInteligente(nichoKey, tipoEstrategia, SHOPEE_APP_ID, SHOPEE_SECRET);
 
                     if (produto) {
-                        // Limpa o título de caracteres especiais
                         const tituloLimpo = produto.titulo.replace(/[\*\_\`\[\]]/g, "").trim();
 
                         const legenda = 
@@ -106,13 +128,15 @@ export async function onRequestPost(context) {
                             ]
                         };
 
-                        if (produto.imagem) {
-                            await sendTelegramPhoto(TELEGRAM_TOKEN, chatId, produto.imagem, legenda, botoes);
-                        } else {
-                            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, legenda, botoes);
-                        }
+                        // Tenta enviar com foto; se a foto falhar, envia como mensagem simples
+                        await sendTelegramPhotoOrFallback(TELEGRAM_TOKEN, chatId, produto.imagem, legenda, botoes);
                     } else {
-                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ A API da Shopee não retornou ofertas nesta tentativa. Clique em 'Próxima Oferta' para tentar outro item.");
+                        await sendTelegramMessage(TELEGRAM_TOKEN, chatId, "⚠️ Nenhuma oferta retornada nesta busca. Clique no botão abaixo para tentar outra opção!", {
+                            inline_keyboard: [
+                                [{ text: "🔄 Tentar Novamente", callback_data: action }],
+                                [{ text: "🏠 Menu Principal", callback_data: "menu_principal" }]
+                            ]
+                        });
                     }
                 }
                 return new Response("OK", { status: 200 });
@@ -122,40 +146,19 @@ export async function onRequestPost(context) {
         return new Response("OK", { status: 200 });
     } catch (err) {
         if (chatId && TELEGRAM_TOKEN) {
-            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `❌ Erro interno: ${err.message}`);
+            await sendTelegramMessage(TELEGRAM_TOKEN, chatId, `❌ Erro de execução: ${err.message}`);
         }
         return new Response("OK", { status: 200 });
     }
 }
 
-// Sub-palavras-chave para rotação e anti-repetição
-const SUB_KEYWORDS = {
-    casa: [
-        "panela antiaderente", "utensilios cozinha inox", "organizadores casa", 
-        "fritadeira air fryer", "jogo de pratos", "luminaria led", "mop giratorio", 
-        "jogo de cama casal", "liquidificador", "garrafa termica", "copo termico",
-        "kit de facas", "suporte temperos", "almofadas decorativas"
-    ],
-    tech: [
-        "fone de ouvido bluetooth", "smartwatch esportivo", "carregador rapido usb", 
-        "suporte para celular", "teclado gamer", "caixa de som bluetooth", 
-        "mouse sem fio", "ring light", "cabo tipo c", "fone gamer", "hub usb"
-    ],
-    moda: [
-        "vestido feminino elegante", "tenis masculino esportivo", "bolsa feminina couro", 
-        "oculos de sol unisex", "camiseta masculina", "relogio masculino luxo", 
-        "conjunto feminino", "mochila impermeavel", "carteira masculina"
-    ]
-};
-
-// Algoritmo de busca variada na Shopee
+// Algoritmo de busca com rotação e anti-repetição
 async function buscarOfertaInteligente(nicho, estrategia, appId, secret) {
     try {
         const keywordsList = SUB_KEYWORDS[nicho] || ["ofertas"];
         const keywordSorteada = keywordsList[Math.floor(Math.random() * keywordsList.length)];
-        const pageSorteada = Math.floor(Math.random() * 3) + 1; // Páginas 1, 2 ou 3
+        const pageSorteada = Math.floor(Math.random() * 3) + 1; // Páginas 1 a 3
 
-        // sortType 5 = Maior Comissão | sortType 2 = Mais Vendidos
         const sortType = estrategia === "comissao" ? 5 : 2;
 
         const query = `
@@ -196,10 +199,9 @@ async function buscarOfertaInteligente(nicho, estrategia, appId, secret) {
         const produtos = data?.data?.productOfferV2?.nodes;
 
         if (produtos && produtos.length > 0) {
-            // Sorteia 1 produto aleatório dos 20 retornados
             const produtoSorteado = produtos[Math.floor(Math.random() * produtos.length)];
             return {
-                titulo: produtoSorteado.productName,
+                titulo: produtoSorteado.productName || "Produto Shopee",
                 preco: parseFloat(produtoSorteado.price || 0).toFixed(2).replace(".", ","),
                 link: produtoSorteado.offerLink,
                 imagem: produtoSorteado.imageUrl
@@ -235,17 +237,29 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup = null) {
     } catch (e) {}
 }
 
-async function sendTelegramPhoto(token, chatId, photoUrl, caption, replyMarkup = null) {
-    try {
-        await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                chat_id: chatId,
-                photo: photoUrl,
-                caption: caption,
-                reply_markup: replyMarkup
-            })
-        });
-    } catch (e) {}
+// Envia a foto com fallback para mensagem de texto caso a URL da imagem falhe
+async function sendTelegramPhotoOrFallback(token, chatId, photoUrl, caption, replyMarkup = null) {
+    let enviouComFoto = false;
+
+    if (photoUrl) {
+        try {
+            const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    photo: photoUrl,
+                    caption: caption,
+                    reply_markup: replyMarkup
+                })
+            });
+            const data = await res.json();
+            if (data.ok) enviouComFoto = true;
+        } catch (e) {}
+    }
+
+    // Se a foto falhar, envia o texto com o link e botão sem travar!
+    if (!enviouComFoto) {
+        await sendTelegramMessage(token, chatId, caption, replyMarkup);
+    }
 }
